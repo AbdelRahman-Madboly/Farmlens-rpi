@@ -1,0 +1,233 @@
+═══════════════════════════════════════════════════════════════════════════════
+  FARMLENS RPi NODE — COMPLETE SETUP GUIDE
+  Works on any Raspberry Pi 4 with Raspberry Pi OS (Bookworm 64-bit)
+═══════════════════════════════════════════════════════════════════════════════
+
+WHAT THIS IS
+────────────
+FarmLens RPi Node is a Python server that:
+  • Runs on any Raspberry Pi 4
+  • Captures photos from RPi Camera v1.3 / v2 / HQ  (or USB webcam)
+  • Receives mock sensor data from ESP32 via WiFi
+  • Runs mock AI detection (upgradeable to real TFLite model)
+  • Serves a web dashboard and REST API on port 8000
+  • Starts automatically on power-up
+  • All settings editable in .env — no code changes needed
+
+QUICK START (New Raspberry Pi)
+──────────────────────────────
+1. Flash Raspberry Pi OS (Bookworm 64-bit) to SD card using Raspberry Pi Imager
+   → Enable SSH and set WiFi credentials in the Imager settings (gear icon ⚙)
+
+2. Boot the RPi and find its IP:
+     From router admin page, or
+     On RPi terminal: hostname -I
+
+3. Copy this project folder to the RPi:
+     Option A — USB stick: copy farmlens-rpi folder to /home/YOUR_USER/
+     Option B — SCP from PC:
+       scp -r farmlens-rpi/ pi@192.168.1.XXX:/home/pi/
+
+4. SSH into the RPi:
+     ssh pi@192.168.1.XXX
+
+5. Run the installer (one command does everything):
+     cd ~/farmlens-rpi
+     chmod +x install.sh
+     ./install.sh
+
+6. Open the dashboard in any browser on the same WiFi:
+     http://192.168.1.XXX:8000
+
+That's it. The service auto-starts on every boot from now on.
+
+
+CONFIGURATION (.env file)
+──────────────────────────
+All settings are in the .env file. Edit it and restart the service.
+
+  nano ~/farmlens-rpi/.env
+  sudo systemctl restart farmlens
+
+Key settings:
+
+  NODE_ID=FL-001              → Node identifier (must match ESP32 NODE_ID)
+  API_PORT=8000               → Port the server listens on
+  CAMERA_BACKEND=picamera2    → "picamera2" or "opencv" (USB webcam)
+  AI_MODE=mock                → "mock" or "tflite" (see AI UPGRADE below)
+  CYCLE_INTERVAL_S=30         → How often to capture and process (seconds)
+  DEFAULT_W1=0.6              → AI confidence weight in fusion formula
+  DEFAULT_W2=0.4              → Sensor stress weight in fusion formula
+  DEFAULT_THETA=0.5           → Alert threshold (Ccombined > theta = alert)
+
+
+SERVICE MANAGEMENT
+──────────────────
+  sudo systemctl status  farmlens     → Check if running
+  sudo systemctl start   farmlens     → Start manually
+  sudo systemctl stop    farmlens     → Stop
+  sudo systemctl restart farmlens     → Restart (e.g. after .env change)
+  sudo systemctl enable  farmlens     → Enable auto-start on boot
+  sudo systemctl disable farmlens     → Disable auto-start
+  journalctl -u farmlens -f           → Watch live logs
+  journalctl -u farmlens -n 50        → Last 50 log lines
+
+
+CAMERA SETUP
+────────────
+RPi Camera v1.3 / v2 / HQ (CSI ribbon cable):
+  1. Connect ribbon cable (RPi powered OFF)
+  2. Enable camera in raspi-config if needed:
+       sudo raspi-config → Interface Options → Camera → Enable
+  3. In .env: CAMERA_BACKEND=picamera2
+  4. Restart: sudo systemctl restart farmlens
+  Test: python3 -c "from picamera2 import Picamera2; c=Picamera2(); print('OK')"
+
+USB Webcam:
+  1. Plug USB webcam into any RPi USB port
+  2. In .env: CAMERA_BACKEND=opencv  and  CAMERA_INDEX=0
+  3. Restart: sudo systemctl restart farmlens
+  Test: python3 -c "import cv2; c=cv2.VideoCapture(0); print('OK' if c.isOpened() else 'FAIL')"
+
+
+WIFI / NETWORK CHANGES
+───────────────────────
+The RPi connects to WiFi via the OS — not through this software.
+
+To change WiFi network:
+  Option A (GUI): Use the desktop WiFi settings
+  Option B (terminal):
+    sudo nmtui   → NetworkManager TUI → Edit/Activate connection
+  Option C (raspi-config):
+    sudo raspi-config → System Options → Wireless LAN
+
+After changing WiFi, the FarmLens service restarts automatically
+(systemd After=network-online.target).
+
+To change the port (e.g. from 8000 to 9000):
+  nano ~/.farmlens-rpi/.env → API_PORT=9000
+  sudo systemctl restart farmlens
+  (Also update the Flutter app connection screen to port 9000)
+
+
+ESP32 CONNECTION
+────────────────
+The ESP32 must:
+  • Be on the same WiFi network as the RPi
+  • Have RPI_IP set to this RPi's IP address
+  • POST to http://<RPI_IP>:8000/api/sensor every 5 seconds
+
+The RPi dashboard shows "ESP32: ✓" when connected.
+If "ESP32: ✗", check:
+  1. ESP32 is on the same WiFi network
+  2. RPI_IP in ESP32 firmware matches this RPi's current IP
+  3. Port 8000 is not blocked by any firewall
+
+
+FLUTTER APP CONNECTION
+───────────────────────
+In the FarmLens app Connection screen:
+  IP:   <this RPi's IP>  (e.g. 192.168.1.106)
+  Port: 8000
+
+The app connects to the RPi (not the ESP32 directly).
+The ESP32 is only a sensor sender — it does NOT serve the app in Phase 2.
+
+
+AI MODEL UPGRADE (when ready)
+──────────────────────────────
+When you have a real plant disease TFLite model:
+
+  1. Copy your model file to:
+       ~/farmlens-rpi/models/plant_disease.tflite
+
+  2. Edit .env:
+       AI_MODE=tflite
+       MODEL_FILE=plant_disease.tflite
+
+  3. Install TFLite runtime:
+       source ~/farmlens-rpi/venv/bin/activate
+       pip install tflite-runtime
+
+  4. Restart:
+       sudo systemctl restart farmlens
+
+  5. Check logs — should say "TFLite model loaded" not "MOCK MODE"
+       journalctl -u farmlens -n 20
+
+The API, Flutter app, dashboard, and all other code require
+ZERO changes when switching from mock to real AI.
+
+
+ADDING A NEW RPi (Scaling Out)
+───────────────────────────────
+For each additional RPi node:
+  1. Copy this folder to the new RPi
+  2. Change NODE_ID in .env (e.g. FL-002, FL-003)
+  3. Run ./install.sh
+  4. In the Flutter app, connect to the new RPi's IP
+
+Each RPi is an independent node. The Flutter app can be pointed at
+any node by changing the connection IP.
+
+
+TROUBLESHOOTING
+───────────────
+Service not starting:
+  journalctl -u farmlens -n 30
+  → Look for Python import errors or "Permission denied"
+
+Camera not working:
+  python3 -c "from picamera2 import Picamera2; Picamera2()"
+  → If error: check ribbon cable, try sudo raspi-config → camera enable
+
+Port 8000 already in use:
+  sudo ss -tlnp | grep 8000
+  → Kill old process or change API_PORT in .env
+
+Dashboard shows old data after restart:
+  The database (farmlens.db) persists between restarts.
+  To clear history: rm ~/farmlens-rpi/farmlens.db
+  (It will be recreated automatically on next start)
+
+ESP32 shows POST FAIL:
+  1. Verify RPi IP hasn't changed: hostname -I
+  2. Update RPI_IP in ESP32 firmware and reflash
+  3. Or assign the RPi a static IP via your router's DHCP reservation
+
+
+FILE STRUCTURE
+──────────────
+farmlens-rpi/
+├── .env                ← ALL user settings here (edit this)
+├── install.sh          ← Run once on new RPi to set everything up
+├── main.py             ← Entry point / orchestrator
+├── config.py           ← Reads .env, defines all constants
+├── camera.py           ← Camera capture (picamera2 or opencv)
+├── inference.py        ← AI inference (mock or TFLite)
+├── fusion.py           ← Sensor fusion + ESP32 data store
+├── logger.py           ← SQLite + JPEG helpers
+├── api.py              ← FastAPI server + web dashboard
+├── requirements.txt    ← Python package list
+├── start.sh            ← Created by install.sh
+├── farmlens.db         ← SQLite database (auto-created)
+├── farmlens.log        ← Log file (auto-created)
+├── models/             ← Put .tflite model here when ready
+└── logs/images/        ← One JPEG per cycle (auto-created)
+
+
+API REFERENCE
+─────────────
+GET  /                       Web dashboard (browser)
+GET  /api/status             Node health (uptime, ESP32, camera)
+POST /api/sensor             ESP32 posts sensor data here
+GET  /api/live               Current sensor + AI data (app polls every 5s)
+GET  /api/logs?limit=50      Cycle history
+GET  /api/image/{cycle_id}   JPEG image for a specific cycle
+GET  /api/snapshot           Fresh live camera frame
+GET  /api/settings           Fusion weights (w1, w2, theta)
+POST /api/settings           Update fusion weights live (no restart)
+
+═══════════════════════════════════════════════════════════════════════════════
+  FarmLens — Suez Canal University · IC EISIS 2026
+═══════════════════════════════════════════════════════════════════════════════

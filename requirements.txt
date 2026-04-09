@@ -1,0 +1,14 @@
+# FarmLens RPi Node — Python dependencies
+# Install with: pip install -r requirements.txt
+#
+# Note: picamera2, opencv, and numpy are installed via apt (system packages)
+# because ARM wheels are not available on PyPI for all versions.
+# The venv is created with --system-site-packages to access them.
+
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+
+# Optional — for real TFLite inference (AI_MODE=tflite)
+# Uncomment ONE of these after verifying your Python/RPi version:
+# tflite-runtime
+# tensorflow-lite
